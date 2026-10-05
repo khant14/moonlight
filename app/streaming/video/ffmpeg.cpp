@@ -1850,6 +1850,14 @@ int FFmpegVideoDecoder::decoderThreadProcThunk(void *context)
 
 void FFmpegVideoDecoder::decoderThreadProc()
 {
+    // Decoding sits on the critical path between network receive and present,
+    // so don't let it get preempted by background work on a busy system.
+    if (SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH) < 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Unable to set decoder thread to high priority: %s",
+                    SDL_GetError());
+    }
+
     while (!SDL_AtomicGet(&m_DecoderThreadShouldQuit)) {
         if (m_FramesIn == m_FramesOut) {
             VIDEO_FRAME_HANDLE handle;

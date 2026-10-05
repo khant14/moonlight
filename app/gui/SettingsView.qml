@@ -1023,6 +1023,22 @@ Flickable {
                 }
 
                 CheckBox {
+                    id: ntscFrameRateCheck
+                    width: parent.width
+                    text: qsTr("Use NTSC frame rates, e.g. 59.94 instead of 60 FPS (Apollo)")
+                    font.pointSize: 12
+                    checked: StreamingPreferences.ntscFrameRate
+                    onCheckedChanged: {
+                        StreamingPreferences.ntscFrameRate = checked
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Enable this if your display runs at 59.94 Hz or 119.88 Hz (common on TVs). Matching the stream to the display avoids a periodic dropped or repeated frame.")
+                }
+
+                CheckBox {
                     id: clipboardSyncCheck
                     width: parent.width
                     text: qsTr("Sync clipboard with host (Apollo)")

@@ -126,6 +126,12 @@ public:
     bool vDisplayDriverReady;
     QStringList serverCommands;
 
+    // Apollo is the only host that reports client permissions
+    bool isApolloHost() const
+    {
+        return permission >= 0;
+    }
+
     bool hasPermission(int perm) const
     {
         // Hosts that don't report permissions don't restrict anything

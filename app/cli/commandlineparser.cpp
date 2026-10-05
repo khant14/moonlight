@@ -370,6 +370,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("yuv444", "YUV 4:4:4 sampling, if supported");
     parser.addToggleOption("virtual-display", "streaming to a virtual display (Apollo)");
     parser.addToggleOption("clipboard-sync", "clipboard sync with host (Apollo)");
+    parser.addToggleOption("ntsc-framerate", "NTSC frame rates like 59.94 FPS (Apollo)");
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
     parser.addChoiceOption("video-codec", "video codec", m_VideoCodecMap.keys());
     parser.addChoiceOption("video-decoder", "video decoder", m_VideoDecoderMap.keys());
@@ -465,6 +466,9 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     // Resolve --clipboard-sync and --no-clipboard-sync options
     preferences->clipboardSync = parser.getToggleOptionValue("clipboard-sync", preferences->clipboardSync);
+
+    // Resolve --ntsc-framerate and --no-ntsc-framerate options
+    preferences->ntscFrameRate = parser.getToggleOptionValue("ntsc-framerate", preferences->ntscFrameRate);
 
     // Resolve --game-optimization and --no-game-optimization options
     preferences->gameOptimizations = parser.getToggleOptionValue("game-optimization", preferences->gameOptimizations);

@@ -1,6 +1,7 @@
 #include "session.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
+#include "streaming/systemperf.h"
 #include "backend/richpresencemanager.h"
 
 #include <Limelight.h>
@@ -13,6 +14,52 @@
 
 #ifdef HAVE_SLVIDEO
 #include "video/slvid.h"
+#endif
+
+#ifdef Q_OS_WIN32
+#include <windows.h>
+
+// Windows 11 may run "background" processes on efficiency cores at reduced
+// clock speeds (EcoQoS), which causes frame time spikes and audio glitches
+// when the stream window loses focus. These definitions mirror the ones in
+// newer Windows SDKs so we can opt out regardless of the SDK version.
+namespace {
+struct MlPowerThrottlingState {
+    ULONG Version;
+    ULONG ControlMask;
+    ULONG StateMask;
+};
+const int kProcessPowerThrottling = 4; // PROCESS_INFORMATION_CLASS::ProcessPowerThrottling
+const ULONG kPowerThrottlingCurrentVersion = 1;
+const ULONG kPowerThrottlingExecutionSpeed = 0x1;
+const ULONG kPowerThrottlingIgnoreTimerResolution = 0x4;
+
+void setProcessPowerThrottling(bool allowThrottling)
+{
+    typedef BOOL (WINAPI *SetProcessInformationFn)(HANDLE, int, LPVOID, DWORD);
+    auto setProcessInformation = (SetProcessInformationFn)
+            GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetProcessInformation");
+    if (setProcessInformation == nullptr) {
+        // Not available prior to Windows 8
+        return;
+    }
+
+    MlPowerThrottlingState state = {};
+    state.Version = kPowerThrottlingCurrentVersion;
+    if (!allowThrottling) {
+        // Opt out of EcoQoS and keep honoring our 1 ms timer resolution request
+        state.ControlMask = kPowerThrottlingExecutionSpeed | kPowerThrottlingIgnoreTimerResolution;
+        state.StateMask = 0;
+    }
+    // else: an empty ControlMask returns control to the system default policy
+
+    if (!setProcessInformation(GetCurrentProcess(), kProcessPowerThrottling, &state, sizeof(state))) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "SetProcessInformation(ProcessPowerThrottling) failed: %d",
+                    (int)GetLastError());
+    }
+}
+}
 #endif
 
 #ifdef Q_OS_WIN32
@@ -347,6 +394,12 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
 
 int Session::drSetup(int videoFormat, int width, int height, int frameRate, void *, int)
 {
+    // Convert NTSC frame rates requested in thousandths back to whole
+    // frames per second for the decoder and pacer.
+    if (frameRate > 1000) {
+        frameRate = (frameRate + 500) / 1000;
+    }
+
     s_ActiveSession->m_ActiveVideoFormat = videoFormat;
     s_ActiveSession->m_ActiveVideoWidth = width;
     s_ActiveSession->m_ActiveVideoHeight = height;
@@ -1734,12 +1787,23 @@ bool Session::startConnectionAsync()
 
     QString rtspSessionUrl;
 
+    // Apollo accepts the frame rate in thousandths of a frame per second,
+    // so we can request NTSC rates (59.94, 119.88, etc.) that exactly match
+    // the client display. Other hosts would misinterpret this value.
+    STREAM_CONFIGURATION launchConfig = m_StreamConfig;
+    if (m_Preferences->ntscFrameRate && m_Computer->isApolloHost()) {
+        launchConfig.fps = (int)qRound(m_StreamConfig.fps * 1000 * 1000 / 1001.0);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Requesting NTSC frame rate: %.3f FPS",
+                    launchConfig.fps / 1000.0);
+    }
+
     for (int attempt = 0;; attempt++) {
         try {
             NvHTTP http(m_Computer);
             http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
                           m_Computer->isNvidiaServerSoftware,
-                          m_App.id, m_App.uuid, &m_StreamConfig,
+                          m_App.id, m_App.uuid, &launchConfig,
                           enableGameOptimizations,
                           m_Preferences->playAudioOnHost,
                           m_InputHandler->getAttachedGamepadMask(),
@@ -1843,7 +1907,11 @@ bool Session::startConnectionAsync()
                                                                          false);
     }
 
-    int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,
+    // Pick up the network settings chosen above along with the launch frame rate
+    STREAM_CONFIGURATION connConfig = m_StreamConfig;
+    connConfig.fps = launchConfig.fps;
+
+    int err = LiStartConnection(&hostInfo, &connConfig, &k_ConnCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
     if (err != 0) {
@@ -2083,6 +2151,14 @@ void Session::exec()
     // Set timer resolution to 1 ms on Windows for greater
     // sleep precision and more accurate callback timing.
     SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
+
+    // Keep the OS from deprioritizing us while streaming
+    SystemPerf::beginStreaming();
+
+#ifdef Q_OS_WIN32
+    // Don't let Windows treat us as a background process while streaming
+    setProcessPowerThrottling(false);
+#endif
 
     int currentDisplayIndex = SDL_GetWindowDisplayIndex(m_Window);
 
@@ -2467,6 +2543,10 @@ DispatchDeferredCleanup:
     m_InputHandler->setCaptureActive(false);
     SDL_EnableScreenSaver();
     SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "0");
+    SystemPerf::endStreaming();
+#ifdef Q_OS_WIN32
+    setProcessPowerThrottling(true);
+#endif
     if (QGuiApplication::platformName() == "eglfs") {
         QGuiApplication::restoreOverrideCursor();
     }

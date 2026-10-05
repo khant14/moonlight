@@ -160,6 +160,7 @@ public:
     Q_PROPERTY(bool useVirtualDisplay MEMBER useVirtualDisplay NOTIFY useVirtualDisplayChanged)
     Q_PROPERTY(int resolutionScaleFactor MEMBER resolutionScaleFactor NOTIFY resolutionScaleFactorChanged)
     Q_PROPERTY(bool clipboardSync MEMBER clipboardSync NOTIFY clipboardSyncChanged)
+    Q_PROPERTY(bool ntscFrameRate MEMBER ntscFrameRate NOTIFY ntscFrameRateChanged)
 
     Q_INVOKABLE bool retranslate();
 
@@ -208,6 +209,7 @@ public:
     bool useVirtualDisplay;
     int resolutionScaleFactor;
     bool clipboardSync;
+    bool ntscFrameRate;
 
 signals:
     void displayModeChanged();
@@ -249,6 +251,7 @@ signals:
     void useVirtualDisplayChanged();
     void resolutionScaleFactorChanged();
     void clipboardSyncChanged();
+    void ntscFrameRateChanged();
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);
