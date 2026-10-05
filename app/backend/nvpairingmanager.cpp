@@ -204,7 +204,7 @@ NvPairingManager::saltPin(const QByteArray& salt, QString pin)
 }
 
 NvPairingManager::PairState
-NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverCert)
+NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverCert, QString passphrase)
 {
     int serverMajorVersion = NvHTTP::parseQuad(appVersion).at(0);
     qInfo() << "Pairing with server generation:" << serverMajorVersion;
@@ -230,10 +230,22 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     QByteArray aesKey = QCryptographicHash::hash(saltedPin, hashAlgo).constData();
     aesKey.truncate(16);
 
+    // The OTP hash below must use the same salt string that the host receives
+    QString saltHex = salt.toHex().toUpper();
+    QString pairingArguments = "updateState=1&phrase=getservercert&salt=" +
+                               saltHex + "&clientcert=" + IdentityManager::get()->getCertificate().toHex();
+
+    // Apollo OTP pairing: prove knowledge of the PIN and passphrase
+    // generated on the host so pairing completes without user action.
+    if (!passphrase.isEmpty()) {
+        QByteArray otpAuth = QCryptographicHash::hash((pin + saltHex + passphrase).toUtf8(),
+                                                      QCryptographicHash::Sha256);
+        pairingArguments += "&otpauth=" + otpAuth.toHex().toUpper();
+    }
+
     QString getCert = m_Http.openConnectionToString(m_Http.m_BaseUrlHttp,
                                                     "pair",
-                                                    "devicename=roth&updateState=1&phrase=getservercert&salt=" +
-                                                    salt.toHex() + "&clientcert=" + IdentityManager::get()->getCertificate().toHex(),
+                                                    pairingArguments,
                                                     0);
     NvHTTP::verifyResponseStatus(getCert);
     if (NvHTTP::getXmlString(getCert, "paired") != "1")
@@ -266,7 +278,7 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     QByteArray encryptedChallenge = encrypt(randomChallenge, aesKey);
     QString challengeXml = m_Http.openConnectionToString(m_Http.m_BaseUrlHttp,
                                                          "pair",
-                                                         "devicename=roth&updateState=1&clientchallenge=" +
+                                                         "updateState=1&clientchallenge=" +
                                                          encryptedChallenge.toHex(),
                                                          REQUEST_TIMEOUT_MS);
     NvHTTP::verifyResponseStatus(challengeXml);
@@ -297,7 +309,7 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     QByteArray encryptedChallengeResponseHash = encrypt(paddedHash, aesKey);
     QString respXml = m_Http.openConnectionToString(m_Http.m_BaseUrlHttp,
                                                     "pair",
-                                                    "devicename=roth&updateState=1&serverchallengeresp=" +
+                                                    "updateState=1&serverchallengeresp=" +
                                                     encryptedChallengeResponseHash.toHex(),
                                                     REQUEST_TIMEOUT_MS);
     NvHTTP::verifyResponseStatus(respXml);
@@ -344,7 +356,7 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
 
     QString secretRespXml = m_Http.openConnectionToString(m_Http.m_BaseUrlHttp,
                                                           "pair",
-                                                          "devicename=roth&updateState=1&clientpairingsecret=" +
+                                                          "updateState=1&clientpairingsecret=" +
                                                           clientPairingSecret.toHex(),
                                                           REQUEST_TIMEOUT_MS);
     NvHTTP::verifyResponseStatus(secretRespXml);
@@ -357,7 +369,7 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
 
     QString pairChallengeXml = m_Http.openConnectionToString(m_Http.m_BaseUrlHttps,
                                                              "pair",
-                                                             "devicename=roth&updateState=1&phrase=pairchallenge",
+                                                             "updateState=1&phrase=pairchallenge",
                                                              REQUEST_TIMEOUT_MS);
     NvHTTP::verifyResponseStatus(pairChallengeXml);
     if (NvHTTP::getXmlString(pairChallengeXml, "paired") != "1")

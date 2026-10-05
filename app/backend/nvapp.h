@@ -11,6 +11,8 @@ public:
     bool operator==(const NvApp& other) const
     {
         return id == other.id &&
+                uuid == other.uuid &&
+                index == other.index &&
                 name == other.name &&
                 hdrSupported == other.hdrSupported &&
                 isAppCollectorGame == other.isAppCollectorGame &&
@@ -34,6 +36,9 @@ public:
     serialize(QSettings& settings) const;
 
     int id = 0;
+    // Apollo extensions
+    QString uuid;
+    int index = -1;
     QString name;
     bool hdrSupported = false;
     bool isAppCollectorGame = false;

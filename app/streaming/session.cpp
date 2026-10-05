@@ -28,6 +28,10 @@
 #define SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE 103
 #define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
 #define SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS 105
+#define SDL_CODE_SET_CLIPBOARD_TEXT 106
+
+#define LAUNCH_RETRY_COUNT 3
+#define LAUNCH_RETRY_DELAY_MS 2000
 
 #include <openssl/rand.h>
 
@@ -38,6 +42,7 @@
 #include <QPainter>
 #include <QImage>
 #include <QGuiApplication>
+#include <QClipboard>
 #include <QCursor>
 #include <QScreen>
 
@@ -579,6 +584,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_MouseEmulationRefCount(0),
       m_FlushingWindowEventsRef(0),
       m_ShouldExit(false),
+      m_VirtualDisplay(m_Preferences->useVirtualDisplay),
       m_AsyncConnectionSuccess(false),
       m_PortTestResults(0),
       m_OpusDecoder(nullptr),
@@ -586,6 +592,125 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_AudioSampleCount(0),
       m_DropAudioEndTime(0)
 {
+}
+
+void Session::setVirtualDisplay(bool enabled)
+{
+    m_VirtualDisplay = enabled;
+}
+
+class ClipboardSyncTask : public QRunnable
+{
+public:
+    // If content is null, the host clipboard is fetched and posted back to the session
+    ClipboardSyncTask(Session* session, NvComputer* computer, QString content) :
+        m_Session(session),
+        m_Computer(computer),
+        m_Content(content) {}
+
+    void run() override
+    {
+        NvHTTP http(m_Computer);
+
+        try {
+            if (!m_Content.isNull()) {
+                if (!http.sendClipboard(m_Content)) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                                "Host does not support clipboard sync");
+                }
+                return;
+            }
+
+            QString text = http.getClipboard();
+
+            // Hand the text to the main thread if the session is still active
+            if (Session::get() == m_Session) {
+                SDL_Event event = {};
+                event.type = SDL_USEREVENT;
+                event.user.code = SDL_CODE_SET_CLIPBOARD_TEXT;
+                event.user.data1 = new QString(text);
+                if (SDL_PushEvent(&event) <= 0) {
+                    delete (QString*)event.user.data1;
+                }
+            }
+        } catch (const GfeHttpResponseException& e) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Clipboard sync failed: %s",
+                        e.toQString().toUtf8().constData());
+        } catch (const QtNetworkReplyException& e) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Clipboard sync failed: %s",
+                        e.toQString().toUtf8().constData());
+        }
+    }
+
+private:
+    Session* m_Session;
+    NvComputer* m_Computer;
+    QString m_Content;
+};
+
+// Called on the main thread while the SDL window exists
+void Session::sendClipboardToHost()
+{
+    if (!m_Preferences->clipboardSync || !m_Computer->hasPermission(NvComputer::PERM_CLIPBOARD_SET)) {
+        return;
+    }
+
+    if (!SDL_HasClipboardText()) {
+        return;
+    }
+
+    char* text = SDL_GetClipboardText();
+    if (text == nullptr) {
+        return;
+    }
+
+    QString content = QString::fromUtf8(text);
+    SDL_free(text);
+
+    // Don't echo back what we just received from the host
+    if (content.isEmpty() || content == m_LastSyncedClipboardText) {
+        return;
+    }
+
+    m_LastSyncedClipboardText = content;
+    QThreadPool::globalInstance()->start(new ClipboardSyncTask(this, m_Computer, content));
+}
+
+void Session::fetchClipboardFromHostAsync()
+{
+    if (!m_Preferences->clipboardSync || !m_Computer->hasPermission(NvComputer::PERM_CLIPBOARD_READ)) {
+        return;
+    }
+
+    QThreadPool::globalInstance()->start(new ClipboardSyncTask(this, m_Computer, QString()));
+}
+
+// Called on the main thread before the connection is stopped. The SDL
+// clipboard won't persist after the SDL video subsystem is torn down,
+// so we use the Qt clipboard here.
+void Session::fetchClipboardFromHostSync()
+{
+    if (!m_Preferences->clipboardSync || !m_Computer->hasPermission(NvComputer::PERM_CLIPBOARD_READ)) {
+        return;
+    }
+
+    try {
+        NvHTTP http(m_Computer);
+        QString text = http.getClipboard();
+        if (!text.isEmpty()) {
+            QGuiApplication::clipboard()->setText(text);
+        }
+    } catch (const GfeHttpResponseException& e) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Clipboard sync failed: %s",
+                    e.toQString().toUtf8().constData());
+    } catch (const QtNetworkReplyException& e) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Clipboard sync failed: %s",
+                    e.toQString().toUtf8().constData());
+    }
 }
 
 Session::~Session()
@@ -1609,22 +1734,37 @@ bool Session::startConnectionAsync()
 
     QString rtspSessionUrl;
 
-    try {
-        NvHTTP http(m_Computer);
-        http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
-                      m_Computer->isNvidiaServerSoftware,
-                      m_App.id, &m_StreamConfig,
-                      enableGameOptimizations,
-                      m_Preferences->playAudioOnHost,
-                      m_InputHandler->getAttachedGamepadMask(),
-                      !m_Preferences->multiController,
-                      rtspSessionUrl);
-    } catch (const GfeHttpResponseException& e) {
-        emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
-        return false;
-    } catch (const QtNetworkReplyException& e) {
-        emit displayLaunchError(e.toQString());
-        return false;
+    for (int attempt = 0;; attempt++) {
+        try {
+            NvHTTP http(m_Computer);
+            http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
+                          m_Computer->isNvidiaServerSoftware,
+                          m_App.id, m_App.uuid, &m_StreamConfig,
+                          enableGameOptimizations,
+                          m_Preferences->playAudioOnHost,
+                          m_InputHandler->getAttachedGamepadMask(),
+                          !m_Preferences->multiController,
+                          m_VirtualDisplay,
+                          m_Preferences->resolutionScaleFactor,
+                          rtspSessionUrl);
+            break;
+        } catch (const GfeHttpResponseException& e) {
+            emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
+            return false;
+        } catch (const QtNetworkReplyException& e) {
+            // Transient network errors (such as the host still setting up a
+            // virtual display) are worth retrying before giving up.
+            if (attempt >= LAUNCH_RETRY_COUNT || e.getError() == QNetworkReply::TimeoutError) {
+                emit displayLaunchError(e.toQString());
+                return false;
+            }
+
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Launch request failed (%s), retrying (%d/%d)",
+                        e.toQString().toUtf8().constData(),
+                        attempt + 1, LAUNCH_RETRY_COUNT);
+            SDL_Delay(LAUNCH_RETRY_DELAY_MS);
+        }
     }
 
     QByteArray hostnameStr = m_Computer->activeAddress.address().toUtf8();
@@ -2008,6 +2148,15 @@ void Session::exec()
                     m_VideoDecoder->renderFrameOnMainThread();
                 }
                 break;
+            case SDL_CODE_SET_CLIPBOARD_TEXT: {
+                QString* text = (QString*)event.user.data1;
+                if (!text->isEmpty()) {
+                    m_LastSyncedClipboardText = *text;
+                    SDL_SetClipboardText(text->toUtf8().constData());
+                }
+                delete text;
+                break;
+            }
             case SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER:
                 m_FlushingWindowEventsRef--;
                 break;
@@ -2049,12 +2198,14 @@ void Session::exec()
                     m_AudioMuted = true;
                 }
                 m_InputHandler->notifyFocusLost();
+                fetchClipboardFromHostAsync();
                 break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
                 if (m_Preferences->muteOnFocusLoss) {
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();
+                sendClipboardToHost();
                 break;
             case SDL_WINDOWEVENT_LEAVE:
                 m_InputHandler->notifyMouseLeave();
@@ -2336,6 +2487,11 @@ DispatchDeferredCleanup:
     delete m_VideoDecoder;
     m_VideoDecoder = nullptr;
     SDL_UnlockMutex(m_DecoderLock);
+
+    // Grab the host clipboard one last time. This must happen before
+    // LiStopConnection(), since the host only serves the clipboard to
+    // clients with an active stream.
+    fetchClipboardFromHostSync();
 
     // Propagate state changes from the SDL window back to the Qt window
     //

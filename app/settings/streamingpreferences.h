@@ -157,6 +157,9 @@ public:
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
+    Q_PROPERTY(bool useVirtualDisplay MEMBER useVirtualDisplay NOTIFY useVirtualDisplayChanged)
+    Q_PROPERTY(int resolutionScaleFactor MEMBER resolutionScaleFactor NOTIFY resolutionScaleFactorChanged)
+    Q_PROPERTY(bool clipboardSync MEMBER clipboardSync NOTIFY clipboardSyncChanged)
 
     Q_INVOKABLE bool retranslate();
 
@@ -201,6 +204,11 @@ public:
     CaptureSysKeysMode captureSysKeysMode;
     RendererSelection rendererSelection;
 
+    // Apollo extensions
+    bool useVirtualDisplay;
+    int resolutionScaleFactor;
+    bool clipboardSync;
+
 signals:
     void displayModeChanged();
     void bitrateChanged();
@@ -238,6 +246,9 @@ signals:
     void keepAwakeChanged();
     void languageChanged();
     void rendererSelectionChanged();
+    void useVirtualDisplayChanged();
+    void resolutionScaleFactorChanged();
+    void clipboardSyncChanged();
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);

@@ -181,6 +181,14 @@ CenteredGridView {
                     visible: model.online && model.paired
                 }
                 NavigableMenuItem {
+                    text: qsTr("Pair with OTP")
+                    onTriggered: {
+                        otpPairDialog.pcIndex = index
+                        otpPairDialog.open()
+                    }
+                    visible: model.online && !model.paired
+                }
+                NavigableMenuItem {
                     text: qsTr("Wake PC")
                     onTriggered: computerModel.wakeComputer(index)
                     visible: !model.online && model.wakeable
@@ -294,8 +302,12 @@ CenteredGridView {
 
         // don't allow edits to the rest of the window while open
         property string pin : "0000"
-        text:qsTr("Please enter %1 on your host PC. This dialog will close when pairing is completed.").arg(pin)+"\n\n"+
-             qsTr("If your host PC is running Sunshine, navigate to the Sunshine web UI to enter the PIN.")
+        property bool otp : false
+        text: otp ? qsTr("Pairing with OTP, please wait...") + "\n\n" +
+                    qsTr("OTP pairing is only available with Apollo. If your host is running other software, enter %1 on your host PC to complete pairing.").arg(pin) :
+                    qsTr("Please enter %1 on your host PC. This dialog will close when pairing is completed.").arg(pin)+"\n\n"+
+                    qsTr("If your host PC is running Sunshine, navigate to the Sunshine web UI to enter the PIN.")
+        onClosed: otp = false
         standardButtons: Dialog.Cancel
         onRejected: {
             // FIXME: We should interrupt pairing here
@@ -388,6 +400,73 @@ CenteredGridView {
                 Keys.onEnterPressed: {
                     renamePcDialog.accept()
                 }
+            }
+        }
+    }
+
+    NavigableDialog {
+        id: otpPairDialog
+        property int pcIndex : -1;
+
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        function valid() {
+            return /^[0-9]{4}$/.test(otpPinText.text) && otpPassphraseText.text.length >= 4
+        }
+
+        onOpened: {
+            // Force keyboard focus on the textbox so keyboard navigation works
+            otpPinText.forceActiveFocus()
+        }
+
+        onClosed: {
+            otpPinText.clear()
+            otpPassphraseText.clear()
+        }
+
+        onAccepted: {
+            if (valid()) {
+                // Kick off pairing in the background
+                computerModel.pairComputer(pcIndex, otpPinText.text, otpPassphraseText.text)
+
+                // Display the pairing dialog
+                pairDialog.pin = otpPinText.text
+                pairDialog.otp = true
+                pairDialog.open()
+            }
+            else {
+                errorDialog.text = qsTr("The PIN must be 4 digits and the passphrase must be at least 4 characters long.")
+                errorDialog.helpText = ""
+                errorDialog.open()
+            }
+        }
+
+        ColumnLayout {
+            Label {
+                text: qsTr("Enter the PIN and passphrase generated in the Apollo web UI:")
+                font.bold: true
+            }
+
+            TextField {
+                id: otpPinText
+                placeholderText: qsTr("PIN")
+                Layout.fillWidth: true
+                maximumLength: 4
+                inputMethodHints: Qt.ImhDigitsOnly
+                focus: true
+
+                Keys.onReturnPressed: otpPassphraseText.forceActiveFocus()
+                Keys.onEnterPressed: otpPassphraseText.forceActiveFocus()
+            }
+
+            TextField {
+                id: otpPassphraseText
+                placeholderText: qsTr("Passphrase")
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+
+                Keys.onReturnPressed: otpPairDialog.accept()
+                Keys.onEnterPressed: otpPairDialog.accept()
             }
         }
     }

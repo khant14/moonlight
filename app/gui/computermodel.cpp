@@ -16,6 +16,25 @@ void ComputerModel::initialize(ComputerManager* computerManager)
     m_Computers = m_ComputerManager->getComputers();
 }
 
+QString ComputerModel::formatPermissions(int permission)
+{
+    auto yesNo = [](bool value) { return value ? tr("Yes") : tr("No"); };
+
+    // Launch implies view, and view implies list
+    return tr("Permissions: %1").arg("0x" + QString::number((uint)permission, 16)) + '\n' +
+           " - " + tr("Controller Input: %1").arg(yesNo(permission & NvComputer::PERM_INPUT_CONTROLLER)) + '\n' +
+           " - " + tr("Touch Input: %1").arg(yesNo(permission & NvComputer::PERM_INPUT_TOUCH)) + '\n' +
+           " - " + tr("Pen Input: %1").arg(yesNo(permission & NvComputer::PERM_INPUT_PEN)) + '\n' +
+           " - " + tr("Mouse Input: %1").arg(yesNo(permission & NvComputer::PERM_INPUT_MOUSE)) + '\n' +
+           " - " + tr("Keyboard Input: %1").arg(yesNo(permission & NvComputer::PERM_INPUT_KBD)) + '\n' +
+           " - " + tr("Set Clipboard: %1").arg(yesNo(permission & NvComputer::PERM_CLIPBOARD_SET)) + '\n' +
+           " - " + tr("Read Clipboard: %1").arg(yesNo(permission & NvComputer::PERM_CLIPBOARD_READ)) + '\n' +
+           " - " + tr("Server Command: %1").arg(yesNo(permission & NvComputer::PERM_SERVER_CMD)) + '\n' +
+           " - " + tr("List Apps: %1").arg(yesNo(permission & NvComputer::PERM_LIST)) + '\n' +
+           " - " + tr("View Streams: %1").arg(yesNo(permission & (NvComputer::PERM_VIEW | NvComputer::PERM_LIST))) + '\n' +
+           " - " + tr("Launch Apps: %1").arg(yesNo(permission & (NvComputer::PERM_LAUNCH | NvComputer::PERM_VIEW | NvComputer::PERM_LIST)));
+}
+
 QVariant ComputerModel::data(const QModelIndex& index, int role) const
 {
     if (!index.isValid()) {
@@ -80,7 +99,15 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
                tr("MAC Address: %1").arg(computer->macAddress.isEmpty() ? tr("Unknown") : QString(computer->macAddress.toHex(':'))) + '\n' +
                tr("Pair State: %1").arg(pairState) + '\n' +
                tr("Running Game ID: %1").arg(computer->state == NvComputer::CS_ONLINE ? QString::number(computer->currentGameId) : tr("Unknown")) + '\n' +
-               tr("HTTPS Port: %1").arg(computer->state == NvComputer::CS_ONLINE ? QString::number(computer->activeHttpsPort) : tr("Unknown"));
+               (computer->currentGameUuid.isEmpty() ? QString() : tr("Running Game UUID: %1").arg(computer->currentGameUuid) + '\n') +
+               tr("HTTPS Port: %1").arg(computer->state == NvComputer::CS_ONLINE ? QString::number(computer->activeHttpsPort) : tr("Unknown")) +
+               (computer->vDisplaySupported ?
+                    '\n' + tr("Virtual Display: %1").arg(computer->vDisplayDriverReady ? tr("Ready") : tr("Driver not ready")) :
+                    QString()) +
+               (!computer->serverCommands.isEmpty() ?
+                    '\n' + tr("Server Commands: %1").arg(computer->serverCommands.join(", ")) :
+                    QString()) +
+               (computer->permission >= 0 ? "\n\n" + formatPermissions(computer->permission) : QString());
     }
     default:
         return QVariant();
@@ -213,11 +240,11 @@ void ComputerModel::testConnectionForComputer(int)
     QThreadPool::globalInstance()->start(testConnectionTask);
 }
 
-void ComputerModel::pairComputer(int computerIndex, QString pin)
+void ComputerModel::pairComputer(int computerIndex, QString pin, QString passphrase)
 {
     Q_ASSERT(computerIndex < m_Computers.count());
 
-    m_ComputerManager->pairHost(m_Computers[computerIndex], pin);
+    m_ComputerManager->pairHost(m_Computers[computerIndex], pin, passphrase);
 }
 
 void ComputerModel::handlePairingCompleted(NvComputer*, QString error)

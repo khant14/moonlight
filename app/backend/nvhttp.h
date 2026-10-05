@@ -130,6 +130,15 @@ public:
                  QString tagName);
 
     static
+    QStringList
+    getXmlStringList(QString xml,
+                     QString tagName);
+
+    static
+    QString
+    getDeviceName();
+
+    static
     QByteArray
     getXmlStringFromHex(QString xml,
                         QString tagName);
@@ -165,12 +174,22 @@ public:
     startApp(QString verb,
              bool isGfe,
              int appId,
+             QString appUuid,
              PSTREAM_CONFIGURATION streamConfig,
              bool sops,
              bool localAudio,
              int gamepadMask,
              bool persistGameControllersOnDisconnect,
+             bool virtualDisplay,
+             int resolutionScaleFactor,
              QString& rtspSessionUrl);
+
+    // Apollo clipboard sync extensions
+    QString
+    getClipboard();
+
+    bool
+    sendClipboard(QString content);
 
     QVector<NvApp>
     getAppList();
@@ -193,7 +212,8 @@ private:
                    QString command,
                    QString arguments,
                    int timeoutMs,
-                   NvLogLevel logLevel);
+                   NvLogLevel logLevel,
+                   const QByteArray& postData);
 
     NvAddress m_Address;
     QNetworkAccessManager* m_Nam;

@@ -1005,6 +1005,68 @@ Flickable {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("This will close the app or game you are streaming when you end your stream. You will lose any unsaved progress!")
                 }
+
+                CheckBox {
+                    id: useVirtualDisplayCheck
+                    width: parent.width
+                    text: qsTr("Stream to a virtual display by default (Apollo)")
+                    font.pointSize: 12
+                    checked: StreamingPreferences.useVirtualDisplay
+                    onCheckedChanged: {
+                        StreamingPreferences.useVirtualDisplay = checked
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Asks the host to create a virtual display matching your stream resolution. Requires Apollo with its virtual display driver installed.")
+                }
+
+                CheckBox {
+                    id: clipboardSyncCheck
+                    width: parent.width
+                    text: qsTr("Sync clipboard with host (Apollo)")
+                    font.pointSize: 12
+                    checked: StreamingPreferences.clipboardSync
+                    onCheckedChanged: {
+                        StreamingPreferences.clipboardSync = checked
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Sends your clipboard to the host when the stream window gains focus, and copies the host clipboard back when it loses focus or the stream ends.")
+                }
+
+                Label {
+                    width: parent.width
+                    id: resScaleFactorTitle
+                    text: qsTr("Resolution scale factor (Apollo): %1%").arg(StreamingPreferences.resolutionScaleFactor)
+                    font.pointSize: 12
+                    wrapMode: Text.Wrap
+                }
+
+                Label {
+                    width: parent.width
+                    id: resScaleFactorDesc
+                    text: qsTr("Multiplies the virtual display resolution requested from the host without changing the stream resolution. For example, 120% turns 2000x1000 into 2400x1200.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                }
+
+                Slider {
+                    id: resScaleFactorSlider
+                    width: parent.width
+                    value: StreamingPreferences.resolutionScaleFactor
+                    stepSize: 5
+                    from: 20
+                    to: 200
+                    snapMode: "SnapOnRelease"
+
+                    onValueChanged: {
+                        StreamingPreferences.resolutionScaleFactor = value
+                    }
+                }
             }
         }
 

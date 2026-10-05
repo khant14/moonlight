@@ -35,7 +35,7 @@ public:
 
     Q_INVOKABLE QString generatePinString();
 
-    Q_INVOKABLE void pairComputer(int computerIndex, QString pin);
+    Q_INVOKABLE void pairComputer(int computerIndex, QString pin, QString passphrase = QString());
 
     Q_INVOKABLE void testConnectionForComputer(int computerIndex);
 
@@ -55,6 +55,8 @@ private slots:
     void handlePairingCompleted(NvComputer* computer, QString error);
 
 private:
+    static QString formatPermissions(int permission);
+
     QVector<NvComputer*> m_Computers;
     ComputerManager* m_ComputerManager;
 };

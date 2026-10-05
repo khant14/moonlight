@@ -125,6 +125,9 @@ public:
 
     void setShouldExit(bool quitHostApp = false);
 
+    // Apollo: request the host to stream from a virtual display
+    Q_INVOKABLE void setVirtualDisplay(bool enabled);
+
 signals:
     void stageStarting(QString stage);
 
@@ -151,6 +154,13 @@ private:
     bool validateLaunch(SDL_Window* testWindow);
 
     void emitLaunchWarning(QString text);
+
+    // Apollo clipboard sync
+    void sendClipboardToHost();
+
+    void fetchClipboardFromHostAsync();
+
+    void fetchClipboardFromHostSync();
 
     bool populateDecoderProperties(SDL_Window* window);
 
@@ -264,6 +274,8 @@ private:
     int m_FlushingWindowEventsRef;
     QStringList m_LaunchWarnings;
     bool m_ShouldExit;
+    bool m_VirtualDisplay;
+    QString m_LastSyncedClipboardText;
 
     bool m_AsyncConnectionSuccess;
     int m_PortTestResults;

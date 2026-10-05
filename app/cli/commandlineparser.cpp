@@ -368,6 +368,8 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("performance-overlay", "show performance overlay");
     parser.addToggleOption("hdr", "HDR streaming");
     parser.addToggleOption("yuv444", "YUV 4:4:4 sampling, if supported");
+    parser.addToggleOption("virtual-display", "streaming to a virtual display (Apollo)");
+    parser.addToggleOption("clipboard-sync", "clipboard sync with host (Apollo)");
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
     parser.addChoiceOption("video-codec", "video codec", m_VideoCodecMap.keys());
     parser.addChoiceOption("video-decoder", "video decoder", m_VideoDecoderMap.keys());
@@ -457,6 +459,12 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     // Resolve --touchscreen-trackpad and --no-touchscreen-trackpad options
     preferences->absoluteTouchMode = !parser.getToggleOptionValue("touchscreen-trackpad", !preferences->absoluteTouchMode);
+
+    // Resolve --virtual-display and --no-virtual-display options
+    preferences->useVirtualDisplay = parser.getToggleOptionValue("virtual-display", preferences->useVirtualDisplay);
+
+    // Resolve --clipboard-sync and --no-clipboard-sync options
+    preferences->clipboardSync = parser.getToggleOptionValue("clipboard-sync", preferences->clipboardSync);
 
     // Resolve --game-optimization and --no-game-optimization options
     preferences->gameOptimizations = parser.getToggleOptionValue("game-optimization", preferences->gameOptimizations);

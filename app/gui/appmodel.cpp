@@ -39,12 +39,22 @@ QString AppModel::getRunningAppName()
     return nullptr;
 }
 
-Session* AppModel::createSessionForApp(int appIndex)
+Session* AppModel::createSessionForApp(int appIndex, bool forceVirtualDisplay)
 {
     Q_ASSERT(appIndex < m_VisibleApps.count());
     NvApp app = m_VisibleApps.at(appIndex);
 
-    return new Session(m_Computer, app);
+    Session* session = new Session(m_Computer, app);
+    if (forceVirtualDisplay) {
+        session->setVirtualDisplay(true);
+    }
+    return session;
+}
+
+bool AppModel::isVirtualDisplaySupported()
+{
+    QReadLocker lock(&m_Computer->lock);
+    return m_Computer->vDisplaySupported;
 }
 
 int AppModel::getDirectLaunchAppIndex()

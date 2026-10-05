@@ -579,10 +579,11 @@ class PendingPairingTask : public QObject, public QRunnable
     Q_OBJECT
 
 public:
-    PendingPairingTask(ComputerManager* computerManager, NvComputer* computer, QString pin)
+    PendingPairingTask(ComputerManager* computerManager, NvComputer* computer, QString pin, QString passphrase)
         : m_ComputerManager(computerManager),
           m_Computer(computer),
-          m_Pin(pin)
+          m_Pin(pin),
+          m_Passphrase(passphrase)
     {
         connect(this, &PendingPairingTask::pairingCompleted,
                 computerManager, &ComputerManager::pairingCompleted);
@@ -597,11 +598,16 @@ private:
         NvPairingManager pairingManager(m_Computer);
 
         try {
-           NvPairingManager::PairState result = pairingManager.pair(m_Computer->appVersion, m_Pin, m_Computer->serverCert);
+           NvPairingManager::PairState result = pairingManager.pair(m_Computer->appVersion, m_Pin, m_Computer->serverCert, m_Passphrase);
            switch (result)
            {
            case NvPairingManager::PairState::PIN_WRONG:
-               emit pairingCompleted(m_Computer, tr("The PIN from the PC didn't match. Please try again."));
+               if (!m_Passphrase.isEmpty()) {
+                   emit pairingCompleted(m_Computer, tr("Incorrect PIN or passphrase. Please try again."));
+               }
+               else {
+                   emit pairingCompleted(m_Computer, tr("The PIN from the PC didn't match. Please try again."));
+               }
                break;
            case NvPairingManager::PairState::FAILED:
                if (m_Computer->currentGameId != 0) {
@@ -631,13 +637,14 @@ private:
     ComputerManager* m_ComputerManager;
     NvComputer* m_Computer;
     QString m_Pin;
+    QString m_Passphrase;
 };
 
-void ComputerManager::pairHost(NvComputer* computer, QString pin)
+void ComputerManager::pairHost(NvComputer* computer, QString pin, QString passphrase)
 {
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for pairing to complete
-    PendingPairingTask* pairing = new PendingPairingTask(this, computer, pin);
+    PendingPairingTask* pairing = new PendingPairingTask(this, computer, pin, passphrase);
     QThreadPool::globalInstance()->start(pairing);
 }
 

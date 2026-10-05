@@ -52,6 +52,9 @@ NvComputer::NvComputer(QSettings& settings)
     sortAppList();
 
     this->currentGameId = 0;
+    this->permission = -1;
+    this->vDisplaySupported = false;
+    this->vDisplayDriverReady = false;
     this->pairState = PS_UNKNOWN;
     this->state = CS_UNKNOWN;
     this->gfeVersion = nullptr;
@@ -123,6 +126,14 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
 void NvComputer::sortAppList()
 {
     std::stable_sort(appList.begin(), appList.end(), [](const NvApp& app1, const NvApp& app2) {
+       // Apollo provides a host-defined app order. Apps with
+       // an explicit index sort ahead of those without one.
+       if (app1.index != app2.index) {
+           if (app1.index < 0 || app2.index < 0) {
+               return app1.index >= 0;
+           }
+           return app1.index < app2.index;
+       }
        return app1.name.toLower() < app2.name.toLower();
     });
 }
@@ -204,6 +215,19 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     this->pairState = NvHTTP::getXmlString(serverInfo, "PairStatus") == "1" ?
                 PS_PAIRED : PS_NOT_PAIRED;
     this->currentGameId = NvHTTP::getCurrentGame(serverInfo);
+    this->currentGameUuid = this->currentGameId != 0 ? NvHTTP::getXmlString(serverInfo, "currentgameuuid") : QString();
+
+    // Apollo extensions
+    QString permissionStr = NvHTTP::getXmlString(serverInfo, "Permission");
+    bool permissionOk = false;
+    this->permission = (int)permissionStr.toUInt(&permissionOk);
+    if (!permissionOk) {
+        this->permission = -1;
+    }
+    this->vDisplaySupported = NvHTTP::getXmlString(serverInfo, "VirtualDisplayCapable") == "true";
+    this->vDisplayDriverReady = this->vDisplaySupported &&
+            NvHTTP::getXmlString(serverInfo, "VirtualDisplayDriverReady") == "true";
+    this->serverCommands = NvHTTP::getXmlStringList(serverInfo, "ServerCommand");
     this->appVersion = NvHTTP::getXmlString(serverInfo, "appversion");
     this->gfeVersion = NvHTTP::getXmlString(serverInfo, "GfeVersion");
     this->gpuModel = NvHTTP::getXmlString(serverInfo, "gputype");
@@ -561,6 +585,11 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(pairState);
     ASSIGN_IF_CHANGED(serverCodecModeSupport);
     ASSIGN_IF_CHANGED(currentGameId);
+    ASSIGN_IF_CHANGED(currentGameUuid);
+    ASSIGN_IF_CHANGED(permission);
+    ASSIGN_IF_CHANGED(vDisplaySupported);
+    ASSIGN_IF_CHANGED(vDisplayDriverReady);
+    ASSIGN_IF_CHANGED(serverCommands);
     ASSIGN_IF_CHANGED(activeAddress);
     ASSIGN_IF_CHANGED(state);
     ASSIGN_IF_CHANGED(gfeVersion);

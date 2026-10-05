@@ -203,8 +203,9 @@ CenteredGridView {
             }
         }
 
-        function launchOrResumeSelectedApp(quitExistingApp)
+        function launchOrResumeSelectedApp(quitExistingApp, virtualDisplay)
         {
+            virtualDisplay = !!virtualDisplay
             var runningId = appModel.getRunningAppId()
             if (runningId !== 0 && runningId !== model.appid) {
                 if (quitExistingApp) {
@@ -212,6 +213,7 @@ CenteredGridView {
                     quitAppDialog.segueToStream = true
                     quitAppDialog.nextAppName = model.name
                     quitAppDialog.nextAppIndex = index
+                    quitAppDialog.nextAppVirtualDisplay = virtualDisplay
                     quitAppDialog.open()
                 }
 
@@ -221,7 +223,7 @@ CenteredGridView {
             var component = Qt.createComponent("StreamSegue.qml")
             var segue = component.createObject(stackView, {
                                                    "appName": model.name,
-                                                   "session": appModel.createSessionForApp(index),
+                                                   "session": appModel.createSessionForApp(index, virtualDisplay),
                                                    "isResume": runningId === model.appid
                                                })
             stackView.push(segue)
@@ -300,6 +302,11 @@ CenteredGridView {
                     onTriggered: launchOrResumeSelectedApp(true)
                 }
                 NavigableMenuItem {
+                    text: qsTr("Start in Virtual Display")
+                    onTriggered: launchOrResumeSelectedApp(true, true)
+                    visible: !model.running && appModel.isVirtualDisplaySupported()
+                }
+                NavigableMenuItem {
                     text: qsTr("Quit Game")
                     onTriggered: doQuitGame()
                     visible: model.running
@@ -351,6 +358,7 @@ CenteredGridView {
         property bool segueToStream : false
         property string nextAppName: ""
         property int nextAppIndex: 0
+        property bool nextAppVirtualDisplay: false
         text:qsTr("Are you sure you want to quit %1? Any unsaved progress will be lost.").arg(appName)
         standardButtons: Dialog.Yes | Dialog.No
 
@@ -361,7 +369,7 @@ CenteredGridView {
                 // Store the session and app name if we're going to stream after
                 // successfully quitting the old app.
                 params.nextAppName = nextAppName
-                params.nextSession = appModel.createSessionForApp(nextAppIndex)
+                params.nextSession = appModel.createSessionForApp(nextAppIndex, nextAppVirtualDisplay)
             }
             else {
                 params.nextAppName = null

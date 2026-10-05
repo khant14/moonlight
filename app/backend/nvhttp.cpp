@@ -11,12 +11,14 @@
 #include <QImageReader>
 #include <QtEndian>
 #include <QNetworkProxy>
+#include <QHostInfo>
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
 #define LAUNCH_TIMEOUT_MS 120000
 #define RESUME_TIMEOUT_MS 30000
 #define QUIT_TIMEOUT_MS 30000
+#define CLIPBOARD_TIMEOUT_MS 5000
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #define XML_NAME_EQUALS(x, y) ((x) == (y))
@@ -200,11 +202,14 @@ void
 NvHTTP::startApp(QString verb,
                  bool isGfe,
                  int appId,
+                 QString appUuid,
                  PSTREAM_CONFIGURATION streamConfig,
                  bool sops,
                  bool localAudio,
                  int gamepadMask,
                  bool persistGameControllersOnDisconnect,
+                 bool virtualDisplay,
+                 int resolutionScaleFactor,
                  QString& rtspSessionUrl)
 {
     int riKeyId;
@@ -216,6 +221,7 @@ NvHTTP::startApp(QString verb,
             openConnectionToString(m_BaseUrlHttps,
                                    verb,
                                    "appid="+QString::number(appId)+
+                                   (appUuid.isEmpty() ? "" : "&appuuid="+appUuid)+
                                    "&mode="+QString::number(streamConfig->width)+"x"+
                                    QString::number(streamConfig->height)+"x"+
                                    // Using an FPS value over 60 causes SOPS to default to 720p60,
@@ -223,6 +229,9 @@ NvHTTP::startApp(QString verb,
                                    // used to use 60 here but that locked the frame rate to 60 FPS
                                    // on GFE 3.20.3. We don't need this hack for Sunshine.
                                    QString::number((streamConfig->fps > 60 && isGfe) ? 0 : streamConfig->fps)+
+                                   // Apollo extensions (ignored by other hosts)
+                                   "&scaleFactor="+QString::number(resolutionScaleFactor)+
+                                   "&virtualDisplay="+QString::number(virtualDisplay ? 1 : 0)+
                                    "&additionalStates=1&sops="+QString::number(sops ? 1 : 0)+
                                    "&rikey="+QByteArray(streamConfig->remoteInputAesKey, sizeof(streamConfig->remoteInputAesKey)).toHex()+
                                    "&rikeyid="+QString::number(riKeyId)+
@@ -336,6 +345,14 @@ NvHTTP::getAppList()
                 else if (XML_NAME_EQUALS(name, "ID")) {
                     apps.last().id = xmlReader.readElementText().toInt();
                 }
+                else if (XML_NAME_EQUALS(name, "UUID")) {
+                    apps.last().uuid = xmlReader.readElementText();
+                }
+                else if (XML_NAME_EQUALS(name, "IDX")) {
+                    bool ok;
+                    int index = xmlReader.readElementText().toInt(&ok);
+                    apps.last().index = ok ? index : -1;
+                }
                 else if (XML_NAME_EQUALS(name, "IsHdrSupported")) {
                     apps.last().hdrSupported = xmlReader.readElementText() == "1";
                 }
@@ -396,7 +413,8 @@ NvHTTP::getBoxArt(int appId)
                                           "appid="+QString::number(appId)+
                                           "&AssetType=2&AssetIdx=0",
                                           REQUEST_TIMEOUT_MS,
-                                          NvLogLevel::NVLL_VERBOSE);
+                                          NvLogLevel::NVLL_VERBOSE,
+                                          QByteArray());
     QImage image = QImageReader(reply).read();
     delete reply;
 
@@ -432,6 +450,68 @@ NvHTTP::getXmlString(QString xml,
     return QString();
 }
 
+QStringList
+NvHTTP::getXmlStringList(QString xml,
+                         QString tagName)
+{
+    QXmlStreamReader xmlReader(xml);
+    QStringList list;
+
+    while (!xmlReader.atEnd())
+    {
+        if (xmlReader.readNext() != QXmlStreamReader::StartElement)
+        {
+            continue;
+        }
+
+        if (xmlReader.name() == tagName)
+        {
+            list.append(xmlReader.readElementText());
+        }
+    }
+
+    return list;
+}
+
+QString
+NvHTTP::getClipboard()
+{
+    // Specify the type explicitly, since the host may return
+    // arbitrary content types in the future if it's omitted.
+    return openConnectionToString(m_BaseUrlHttps,
+                                  "actions/clipboard",
+                                  "type=text",
+                                  CLIPBOARD_TIMEOUT_MS,
+                                  NvLogLevel::NVLL_ERROR);
+}
+
+bool
+NvHTTP::sendClipboard(QString content)
+{
+    QNetworkReply* reply = openConnection(m_BaseUrlHttps,
+                                          "actions/clipboard",
+                                          "type=text",
+                                          CLIPBOARD_TIMEOUT_MS,
+                                          NvLogLevel::NVLL_ERROR,
+                                          content.toUtf8());
+    QByteArray response = reply->readAll();
+    delete reply;
+
+    // Apollo returns an empty body on success. Sunshine responds
+    // to unknown endpoints with a 200 containing a 404 XML body.
+    return response.isEmpty();
+}
+
+QString
+NvHTTP::getDeviceName()
+{
+    QString name = QHostInfo::localHostName();
+    if (name.isEmpty()) {
+        name = "roth";
+    }
+    return name;
+}
+
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
 {
     bool ignoreErrors = true;
@@ -461,7 +541,7 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
                                int timeoutMs,
                                NvLogLevel logLevel)
 {
-    QNetworkReply* reply = openConnection(baseUrl, command, arguments, timeoutMs, logLevel);
+    QNetworkReply* reply = openConnection(baseUrl, command, arguments, timeoutMs, logLevel, QByteArray());
     QString ret;
 
     QTextStream stream(reply);
@@ -483,7 +563,8 @@ NvHTTP::openConnection(QUrl baseUrl,
                        QString command,
                        QString arguments,
                        int timeoutMs,
-                       NvLogLevel logLevel)
+                       NvLogLevel logLevel,
+                       const QByteArray& postData)
 {
     // Port must be set
     Q_ASSERT(baseUrl.port(0) != 0);
@@ -493,7 +574,10 @@ NvHTTP::openConnection(QUrl baseUrl,
     url.setPath("/" + command);
 
     // Use a placeholder UID for GFE allow them to quit games for each other.
-    url.setQuery("uniqueid=" + (m_UseTrueUid ? IdentityManager::get()->getUniqueId() : "0123456789ABCDEF") +
+    // Apollo uses the device name to identify clients, so send our real one
+    // to non-GFE hosts. GFE has always been sent a fixed placeholder name.
+    url.setQuery("devicename=" + (m_UseTrueUid ? QString(QUrl::toPercentEncoding(getDeviceName())) : QString("roth")) +
+                 "&uniqueid=" + (m_UseTrueUid ? IdentityManager::get()->getUniqueId() : "0123456789ABCDEF") +
                  "&uuid=" + QUuid::createUuid().toRfc4122().toHex() +
                  ((arguments != nullptr) ? ("&" + arguments) : ""));
 
@@ -515,7 +599,14 @@ NvHTTP::openConnection(QUrl baseUrl,
 #endif
 
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
-    QNetworkReply* reply = m_Nam->get(request);
+    QNetworkReply* reply;
+    if (postData.isNull()) {
+        reply = m_Nam->get(request);
+    }
+    else {
+        request.setHeader(QNetworkRequest::ContentTypeHeader, "text/plain");
+        reply = m_Nam->post(request, postData);
+    }
 
     // Run the request with a timeout if requested
     QEventLoop loop;

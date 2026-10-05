@@ -93,6 +93,7 @@ public:
     NvAddress activeAddress;
     uint16_t activeHttpsPort;
     int currentGameId;
+    QString currentGameUuid;
     QString gfeVersion;
     QString appVersion;
     QVector<NvDisplayMode> displayModes;
@@ -100,6 +101,36 @@ public:
     int serverCodecModeSupport;
     QString gpuModel;
     bool isSupportedServerVersion;
+
+    // Apollo extensions
+    enum Permission : int
+    {
+        PERM_INPUT_CONTROLLER = 0x00000100,
+        PERM_INPUT_TOUCH      = 0x00000200,
+        PERM_INPUT_PEN        = 0x00000400,
+        PERM_INPUT_MOUSE      = 0x00000800,
+        PERM_INPUT_KBD        = 0x00001000,
+        PERM_CLIPBOARD_SET    = 0x00010000,
+        PERM_CLIPBOARD_READ   = 0x00020000,
+        PERM_FILE_UPLOAD      = 0x00040000,
+        PERM_FILE_DOWNLOAD    = 0x00080000,
+        PERM_SERVER_CMD       = 0x00100000,
+        PERM_LIST             = 0x01000000,
+        PERM_VIEW             = 0x02000000,
+        PERM_LAUNCH           = 0x04000000,
+    };
+
+    // -1 if the host doesn't report permissions (non-Apollo hosts)
+    int permission;
+    bool vDisplaySupported;
+    bool vDisplayDriverReady;
+    QStringList serverCommands;
+
+    bool hasPermission(int perm) const
+    {
+        // Hosts that don't report permissions don't restrict anything
+        return permission < 0 || (permission & perm) != 0;
+    }
 
     // Persisted traits
     NvAddress localAddress;
